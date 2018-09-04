@@ -1,5 +1,5 @@
 from cookbook import Cookbook
-from misc import array
+from ..misc import array
 
 import curses
 import logging
@@ -21,6 +21,9 @@ LEFT = 2
 RIGHT = 3
 USE = 4
 N_ACTIONS = USE + 1
+
+SYMBOLS = "?#TWF~%igw$*=|X-[_{&/"
+
 
 def random_free(grid, random):
     pos = None
@@ -62,22 +65,22 @@ class CraftWorld(object):
         self.water_index = self.cookbook.index["water"]
         self.stone_index = self.cookbook.index["stone"]
 
-        self.random = np.random.RandomState(0)
+        self.random = np.random.RandomState(config.seed)
 
     def sample_scenario_with_goal(self, goal):
         assert goal not in self.cookbook.environment
         if goal in self.cookbook.primitives:
             make_island = goal == self.cookbook.index["gold"]
             make_cave = goal == self.cookbook.index["gem"]
-            return self.sample_scenario({goal: 1}, make_island=make_island,
+            return self.sample_scenario(goal, {goal: 1}, make_island=make_island,
                     make_cave=make_cave)
         elif goal in self.cookbook.recipes:
             ingredients = self.cookbook.primitives_for(goal)
-            return self.sample_scenario(ingredients)
+            return self.sample_scenario(goal, ingredients)
         else:
             assert False, "don't know how to build a scenario for %s" % goal
 
-    def sample_scenario(self, ingredients, make_island=False, make_cave=False):
+    def sample_scenario(self, goal, ingredients, make_island=False, make_cave=False):
         # generate grid
         grid = np.zeros((WIDTH, HEIGHT, self.cookbook.n_kinds))
         i_bd = self.cookbook.index["boundary"]
@@ -116,7 +119,7 @@ class CraftWorld(object):
         # generate init pos
         init_pos = random_free(grid, self.random)
 
-        return CraftScenario(grid, init_pos, self)
+        return CraftScenario(goal, grid, init_pos, self)
 
     def visualize(self, transitions):
         def _visualize(win):
@@ -163,7 +166,8 @@ class CraftWorld(object):
         curses.wrapper(_visualize)
 
 class CraftScenario(object):
-    def __init__(self, grid, init_pos, world):
+    def __init__(self, goal, grid, init_pos, world):
+        self.goal = goal
         self.init_grid = grid
         self.init_pos = init_pos
         self.init_dir = 0
@@ -195,7 +199,7 @@ class CraftState(object):
             bhw = (WINDOW_WIDTH * WINDOW_WIDTH) / 2
             bhh = (WINDOW_HEIGHT * WINDOW_HEIGHT) / 2
 
-            grid_feats = array.pad_slice(self.grid, (x-hw, x+hw+1), 
+            grid_feats = array.pad_slice(self.grid, (x-hw, x+hw+1),
                     (y-hh, y+hh+1))
             grid_feats_big = array.pad_slice(self.grid, (x-bhw, x+bhw+1),
                     (y-bhh, y+bhh+1))
@@ -214,7 +218,7 @@ class CraftState(object):
             dir_features[self.dir] = 1
 
             features = np.concatenate((grid_feats.ravel(),
-                    grid_feats_big_red.ravel(), self.inventory, 
+                    grid_feats_big_red.ravel(), self.inventory,
                     dir_features, [0]))
             assert len(features) == self.world.n_features
             self._cached_features = features
@@ -267,7 +271,7 @@ class CraftState(object):
                         thing == self.world.water_index or \
                         thing == self.world.stone_index):
                     continue
-                
+
                 n_inventory = self.inventory.copy()
                 n_grid = self.grid.copy()
 
@@ -317,3 +321,33 @@ class CraftState(object):
     def next_to(self, i_kind):
         x, y = self.pos
         return self.grid[x-1:x+2, y-1:y+2, i_kind].any()
+
+    def pp(self):
+        # {'ladder': 16, 'bridge': 12, 'stone': 6, 'shears': 14, 'gold': 10, 'cloth': 19, 'workshop0': 2, 'workshop1': 3, 'workshop2': 4,
+        #  'bed': 17, 'water': 5, 'rope': 18, 'wood': 9, 'stick': 13, 'iron': 7, 'axe': 20, 'boundary': 1, 'grass': 8, 'plank': 15, 'gem': 11}
+        # print(self.grid, self.inventory, self.pos, self.dir)
+        s = ""
+        for x, r in enumerate(self.grid):
+            for y, i in enumerate(r):
+                if (x, y) == self.pos:
+                    if self.dir is None:
+                        s += "@"
+                    else:
+                        s += "<>^v"[self.dir]
+                elif i.any():
+                    s += SYMBOLS[i.argmax()]
+                else:
+                    s += " "
+            s += "\n"
+        s += "Inventory: "
+        for i, j in enumerate(self.inventory):
+            for _ in range(int(j)):
+                s += SYMBOLS[i]
+        s += "\n"
+        s += "Goal: "
+        s += SYMBOLS[self.scenario.goal]
+        s += "\n"
+        s += "Success: "
+        s += str(self.satisfies(None, self.scenario.goal))
+        s += "\n"
+        return s

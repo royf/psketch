@@ -1,4 +1,4 @@
-from misc.util import Struct, Index
+from ..misc.util import Struct, Index
 
 import copy
 import numpy as np
